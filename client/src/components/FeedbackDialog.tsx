@@ -36,6 +36,7 @@ import {
   X,
   AlertCircle,
   Info,
+  Mail,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -215,6 +216,28 @@ export function FeedbackDialog({
     }
   }, [buildReport]);
 
+  const handleSendEmail = useCallback(() => {
+    const report = buildReport();
+    const text = formatReportAsText(report);
+    const subject = `[SEPA XML] ${CATEGORY_LABELS[category]}: ${title}`;
+    const body = text + (screenshot
+      ? "\n\n---\nNote: A screenshot was attached in the app. Please request it separately if needed."
+      : "");
+
+    // mailto has a practical URL length limit (~2000 chars).
+    // Truncate body if needed and add a note.
+    const maxBodyLen = 1800;
+    const truncatedBody = body.length > maxBodyLen
+      ? body.slice(0, maxBodyLen) + "\n\n[Report truncated — use 'Download report' for full details]"
+      : body;
+
+    const mailto = `mailto:mitrovdim@gmail.com?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(truncatedBody)}`;
+    window.open(mailto, "_blank");
+
+    setSubmitted(true);
+    toast.success("Email client opened with the report.");
+  }, [buildReport, category, title, screenshot]);
+
   const isValid = title.trim().length > 0 && description.trim().length > 0;
 
   if (submitted) {
@@ -224,18 +247,18 @@ export function FeedbackDialog({
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Check className="w-5 h-5 text-[oklch(0.55_0.18_150)]" />
-              Report Downloaded
+              Report Sent
             </DialogTitle>
             <DialogDescription>
-              Thank you for your feedback. Please send the downloaded file(s) to the
-              development team via email or Teams.
+              Thank you for your feedback. Your report has been prepared and sent
+              to the development team.
             </DialogDescription>
           </DialogHeader>
-          <div className="p-4 bg-muted/50 rounded-lg border border-border/50 text-xs text-muted-foreground space-y-1">
-            <p className="font-medium text-foreground text-sm">What to send:</p>
-            <p>1. The <span className="font-data">sepa-feedback-*.json</span> file</p>
+          <div className="p-4 bg-muted/50 rounded-lg border border-border/50 text-xs text-muted-foreground space-y-2">
+            <p className="font-medium text-foreground text-sm">What happens next:</p>
+            <p>The development team will review your report and follow up if needed.</p>
             {screenshot && (
-              <p>2. The <span className="font-data">sepa-feedback-*-screenshot.*</span> file</p>
+              <p className="text-[11px]">Note: If you attached a screenshot, please ensure it was included in the email or send it separately.</p>
             )}
           </div>
           <DialogFooter>
@@ -421,24 +444,36 @@ export function FeedbackDialog({
         </div>
 
         <DialogFooter className="flex-col sm:flex-row gap-2">
+          <div className="flex gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleCopyToClipboard}
+              disabled={!isValid}
+              className="gap-1.5"
+            >
+              {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+              {copied ? "Copied" : "Copy"}
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleDownload}
+              disabled={!isValid}
+              className="gap-1.5"
+            >
+              <Download className="w-3.5 h-3.5" />
+              Download
+            </Button>
+          </div>
           <Button
-            variant="outline"
             size="sm"
-            onClick={handleCopyToClipboard}
+            onClick={handleSendEmail}
             disabled={!isValid}
             className="gap-1.5"
           >
-            {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-            {copied ? "Copied" : "Copy report"}
-          </Button>
-          <Button
-            size="sm"
-            onClick={handleDownload}
-            disabled={!isValid}
-            className="gap-1.5"
-          >
-            <Download className="w-3.5 h-3.5" />
-            Download report
+            <Mail className="w-3.5 h-3.5" />
+            Send via Email
           </Button>
         </DialogFooter>
       </DialogContent>
