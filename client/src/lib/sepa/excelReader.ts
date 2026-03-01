@@ -145,11 +145,11 @@ function readRow(
       // Excel serial date number
       trans.valueDate = excelSerialToDate(cellValue);
     } else if (typeof cellValue === "string") {
-      const parsed = new Date(cellValue);
-      if (!isNaN(parsed.getTime())) {
+      const parsed = parseDate(cellValue);
+      if (parsed && !isNaN(parsed.getTime())) {
         trans.valueDate = parsed;
       } else {
-        validation.addError(sheetName, row, "ValueDate", "Invalid value date");
+        validation.addError(sheetName, row, "ValueDate", `Invalid value date: ${cellValue}`);
         return null;
       }
     } else {
@@ -180,12 +180,11 @@ function readRow(
     if (typeof cellValue === "number") {
       trans.amount = cellValue;
     } else if (typeof cellValue === "string") {
-      const strAmt = cellValue.replace(",", ".").trim();
-      const parsedAmt = parseFloat(strAmt);
-      if (!isNaN(parsedAmt)) {
+      const parsedAmt = parseAmount(cellValue);
+      if (parsedAmt !== null && !isNaN(parsedAmt)) {
         trans.amount = parsedAmt;
       } else {
-        validation.addError(sheetName, row, "Amount", `Invalid amount: ${strAmt}`);
+        validation.addError(sheetName, row, "Amount", `Invalid amount: ${cellValue}`);
         return null;
       }
     } else if (cellValue === undefined || cellValue === null) {
@@ -270,6 +269,99 @@ function findLastRow(
   }
 
   return maxRow;
+}
+
+/**
+ * Parse an amount string, handling various European and international formats:
+ * - Space as thousands separator: "250 000.00" → 250000.00
+ * - Dot as thousands separator with comma decimal: "250.000,00" → 250000.00
+ * - Comma as decimal separator: "1234,56" → 1234.56
+ * - Plain number: "1234.56" → 1234.56
+ * - Negative amounts with parentheses: "(1234.56)" → -1234.56
+ */
+function parseAmount(value: string): number | null {
+  let s = value.trim();
+  if (!s) return null;
+
+  // Handle parentheses for negative amounts
+  const isNeg = s.startsWith("(") && s.endsWith(")");
+  if (isNeg) s = s.slice(1, -1).trim();
+
+  // Remove currency symbols and whitespace-like chars
+  s = s.replace(/[€$£¥]/g, "").trim();
+
+  // Detect format by looking at the last separator
+  const lastComma = s.lastIndexOf(",");
+  const lastDot = s.lastIndexOf(".");
+
+  if (lastComma > lastDot) {
+    // Comma is the decimal separator (European: "1.234,56" or "1234,56")
+    // Remove dots (thousands), replace comma with dot
+    s = s.replace(/\./g, "").replace(",", ".");
+  } else if (lastDot > lastComma) {
+    // Dot is the decimal separator ("1,234.56" or "250 000.00")
+    // Remove commas and spaces (thousands)
+    s = s.replace(/,/g, "").replace(/\s/g, "");
+  } else {
+    // No separator or same position — just remove spaces
+    s = s.replace(/\s/g, "");
+  }
+
+  const result = parseFloat(s);
+  if (isNaN(result)) return null;
+  return isNeg ? -result : result;
+}
+
+/**
+ * Parse a date string, handling DD-MM-YYYY, DD/MM/YYYY, YYYY-MM-DD, and other common formats.
+ * Prioritizes European DD-MM-YYYY format when ambiguous.
+ */
+function parseDate(value: string): Date | null {
+  const s = value.trim();
+  if (!s) return null;
+
+  // Try DD-MM-YYYY or DD/MM/YYYY (European format)
+  const euMatch = s.match(/^(\d{1,2})[\-\/\.](\d{1,2})[\-\/\.](\d{4})$/);
+  if (euMatch) {
+    const day = parseInt(euMatch[1], 10);
+    const month = parseInt(euMatch[2], 10);
+    const year = parseInt(euMatch[3], 10);
+    // If first number > 12, it must be a day (DD-MM-YYYY)
+    // If second number > 12, first must be month (MM-DD-YYYY)
+    // Otherwise, assume DD-MM-YYYY (European default)
+    if (day > 12 || (day <= 12 && month <= 12)) {
+      // Assume DD-MM-YYYY (European)
+      if (month >= 1 && month <= 12 && day >= 1 && day <= 31) {
+        return new Date(year, month - 1, day);
+      }
+    }
+    if (month > 12 && day <= 12) {
+      // Must be MM-DD-YYYY (US) since month > 12
+      // Actually this means the "month" position has > 12, so swap
+      return new Date(year, day - 1, month);
+    }
+    // Default: DD-MM-YYYY
+    if (month >= 1 && month <= 12) {
+      return new Date(year, month - 1, day);
+    }
+  }
+
+  // Try YYYY-MM-DD (ISO format)
+  const isoMatch = s.match(/^(\d{4})[\-\/](\d{1,2})[\-\/](\d{1,2})$/);
+  if (isoMatch) {
+    const year = parseInt(isoMatch[1], 10);
+    const month = parseInt(isoMatch[2], 10);
+    const day = parseInt(isoMatch[3], 10);
+    if (month >= 1 && month <= 12 && day >= 1 && day <= 31) {
+      return new Date(year, month - 1, day);
+    }
+  }
+
+  // Fallback: try native Date parsing
+  const fallback = new Date(s);
+  if (!isNaN(fallback.getTime())) return fallback;
+
+  return null;
 }
 
 /**
