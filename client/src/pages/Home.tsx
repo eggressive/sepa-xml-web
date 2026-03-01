@@ -7,15 +7,23 @@
  * Step-by-step workflow with left sidebar indicator.
  */
 
+import { useState, useMemo } from "react";
 import { StepIndicator } from "@/components/StepIndicator";
 import { UploadStep } from "@/components/steps/UploadStep";
 import { ConfigureStep } from "@/components/steps/ConfigureStep";
 import { PreviewStep } from "@/components/steps/PreviewStep";
 import { ResultsStep } from "@/components/steps/ResultsStep";
 import { HistoryPanel } from "@/components/HistoryPanel";
+import { FeedbackDialog } from "@/components/FeedbackDialog";
 import { useSepaProcessor } from "@/hooks/useSepaProcessor";
 import { useHistory } from "@/hooks/useHistory";
-import { FileCode2, Shield, Lock } from "lucide-react";
+import { FileCode2, Shield, Lock, MessageSquareWarning } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 
 const HERO_BG = "https://d2xsxph8kpxj0f.cloudfront.net/310419663030829368/9KkBeQZaXtNkT9wL6yWokQ/hero-pattern-4RZWWXnJFiVkkCPXUPsLMf.webp";
 
@@ -33,18 +41,7 @@ export default function Home() {
   } = useSepaProcessor();
 
   const { entries, addEntry, removeEntry, clearHistory } = useHistory();
-
-  /**
-   * Wraps generateFiles so that a history entry is recorded after
-   * successful XML generation.
-   */
-  const handleGenerate = () => {
-    generateFiles();
-
-    // After generation, state.generatedFiles will be populated on next render.
-    // We use a microtask to read the updated state from the DOM/hook.
-    // Instead, we record history from the ResultsStep via a callback.
-  };
+  const [feedbackOpen, setFeedbackOpen] = useState(false);
 
   /**
    * Called by ResultsStep once files are rendered, so we can record
@@ -75,6 +72,29 @@ export default function Home() {
     });
   };
 
+  /**
+   * Collect current diagnostics from the processing state
+   * for the feedback dialog.
+   */
+  const diagnostics = useMemo(() => ({
+    currentStep: state.step,
+    selectedProfile: state.selectedProfile?.profileName || null,
+    selectedSheets: state.selectedSheets,
+    fileName: state.file?.name || null,
+    transactionCounts: state.routedPayments.map((rp) => ({
+      type: rp.paymentType,
+      currency: rp.currencyCode,
+      count: rp.transactions.length,
+    })),
+    validationErrors: state.validation.errorCount,
+    validationWarnings: state.validation.warningCount,
+    generatedFiles: state.generatedFiles.map((f) => ({
+      name: f.fileName,
+      schemaValid: f.schemaValidation?.valid !== false,
+    })),
+    lastError: state.error,
+  }), [state]);
+
   return (
     <div className="min-h-screen flex flex-col bg-background">
       {/* Header */}
@@ -93,15 +113,30 @@ export default function Home() {
               </p>
             </div>
           </div>
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-3">
             <div className="hidden sm:flex items-center gap-1.5 text-xs text-muted-foreground">
               <Lock className="w-3 h-3" />
               <span>Offline-capable</span>
             </div>
-            <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+            <div className="hidden sm:flex items-center gap-1.5 text-xs text-muted-foreground">
               <Shield className="w-3.5 h-3.5" />
               <span>Client-side processing</span>
             </div>
+            <div className="w-px h-5 bg-border hidden sm:block" />
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setFeedbackOpen(true)}
+                  className="gap-1.5 text-xs text-muted-foreground hover:text-foreground h-8 px-2.5"
+                >
+                  <MessageSquareWarning className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">Report Issue</span>
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Report an issue or request a feature</TooltipContent>
+            </Tooltip>
           </div>
         </div>
       </header>
@@ -256,9 +291,22 @@ export default function Home() {
       <footer className="border-t border-border py-4 mt-auto">
         <div className="container flex items-center justify-between text-xs text-muted-foreground">
           <span>SEPA XML Generator v1.0</span>
-          <span className="font-data">pain.001.001.03 / pain.001.001.09</span>
+          <button
+            onClick={() => setFeedbackOpen(true)}
+            className="flex items-center gap-1.5 hover:text-foreground transition-colors"
+          >
+            <MessageSquareWarning className="w-3 h-3" />
+            Report an issue
+          </button>
         </div>
       </footer>
+
+      {/* Feedback dialog */}
+      <FeedbackDialog
+        open={feedbackOpen}
+        onOpenChange={setFeedbackOpen}
+        diagnostics={diagnostics}
+      />
     </div>
   );
 }
