@@ -6,6 +6,7 @@ import { getSheetNames, readTransactions } from "@/lib/sepa/excelReader";
 import { validateTransactions } from "@/lib/sepa/validator";
 import { routePayments } from "@/lib/sepa/router";
 import { generateXmlFiles } from "@/lib/sepa/generators";
+import { validateXmlAgainstSchema } from "@/lib/sepa/schemaValidator";
 
 export type ProcessingStep = "upload" | "configure" | "preview" | "results";
 
@@ -153,9 +154,23 @@ export function useSepaProcessor() {
       try {
         const files = generateXmlFiles(prev.routedPayments, prev.selectedProfile);
 
+        // Run XSD schema validation on each generated file
+        const painVersion = prev.selectedProfile.painVersion;
+        const validatedFiles = files.map((file) => {
+          const result = validateXmlAgainstSchema(
+            file.xmlContent,
+            painVersion,
+            file.paymentType,
+          );
+          return {
+            ...file,
+            schemaValidation: result,
+          };
+        });
+
         return {
           ...prev,
-          generatedFiles: files,
+          generatedFiles: validatedFiles,
           step: "results",
           error: null,
         };

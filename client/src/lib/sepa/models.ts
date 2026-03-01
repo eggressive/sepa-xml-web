@@ -134,6 +134,10 @@ export interface GeneratedFile {
   currency: string;
   transactionCount: number;
   totalAmount: number;
+  schemaValidation?: {
+    valid: boolean;
+    issues: { severity: "error" | "warning" | "info"; path: string; message: string }[];
+  };
 }
 
 // ── Helper functions ──
