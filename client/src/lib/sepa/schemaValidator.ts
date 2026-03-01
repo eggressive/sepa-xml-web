@@ -980,6 +980,16 @@ function getTextContent(el: Element): string {
   return text;
 }
 
+// Data-quality type names whose pattern mismatches should be warnings, not errors.
+// These are valid XML but may indicate non-standard data from the source Excel.
+const DATA_QUALITY_TYPES = new Set([
+  "BICIdentifier",
+  "AnyBICIdentifier",
+  "IBAN2007Identifier",
+  "BICFIDec2014Identifier",
+  "AnyBICDec2014Identifier",
+]);
+
 function validateSimpleValue(
   value: string,
   typeName: string,
@@ -1000,12 +1010,15 @@ function validateSimpleValue(
   }
 
   if (rule.pattern && !rule.pattern.test(value)) {
+    // BIC / IBAN pattern mismatches are data-quality issues, not structural errors.
+    // The XML is well-formed; the bank may accept or reject the value.
+    const severity = DATA_QUALITY_TYPES.has(typeName) ? "warning" : "error";
     issues.push({
-      severity: "error",
+      severity,
       path,
       message: `Value "${value}" does not match pattern ${rule.pattern}`,
     });
-    return;
+    if (severity === "error") return;
   }
 
   if (rule.minLength !== undefined && value.length < rule.minLength) {
