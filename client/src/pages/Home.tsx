@@ -12,7 +12,9 @@ import { UploadStep } from "@/components/steps/UploadStep";
 import { ConfigureStep } from "@/components/steps/ConfigureStep";
 import { PreviewStep } from "@/components/steps/PreviewStep";
 import { ResultsStep } from "@/components/steps/ResultsStep";
+import { HistoryPanel } from "@/components/HistoryPanel";
 import { useSepaProcessor } from "@/hooks/useSepaProcessor";
+import { useHistory } from "@/hooks/useHistory";
 import { FileCode2, Shield, Lock } from "lucide-react";
 
 const HERO_BG = "https://d2xsxph8kpxj0f.cloudfront.net/310419663030829368/9KkBeQZaXtNkT9wL6yWokQ/hero-pattern-4RZWWXnJFiVkkCPXUPsLMf.webp";
@@ -29,6 +31,49 @@ export default function Home() {
     generateFiles,
     goToStep,
   } = useSepaProcessor();
+
+  const { entries, addEntry, removeEntry, clearHistory } = useHistory();
+
+  /**
+   * Wraps generateFiles so that a history entry is recorded after
+   * successful XML generation.
+   */
+  const handleGenerate = () => {
+    generateFiles();
+
+    // After generation, state.generatedFiles will be populated on next render.
+    // We use a microtask to read the updated state from the DOM/hook.
+    // Instead, we record history from the ResultsStep via a callback.
+  };
+
+  /**
+   * Called by ResultsStep once files are rendered, so we can record
+   * the export in history.
+   */
+  const recordHistory = () => {
+    if (state.generatedFiles.length === 0) return;
+
+    const totalTxns = state.generatedFiles.reduce((s, f) => s + f.transactionCount, 0);
+    const totalAmt = state.generatedFiles.reduce((s, f) => s + f.totalAmount, 0);
+    const allValid = state.generatedFiles.every((f) => f.schemaValidation?.valid !== false);
+
+    addEntry({
+      sourceFile: state.file?.name || "unknown",
+      profileName: state.selectedProfile?.profileName || "unknown",
+      sheets: state.selectedSheets,
+      files: state.generatedFiles.map((f) => ({
+        fileName: f.fileName,
+        paymentType: f.paymentType,
+        currency: f.currency,
+        transactionCount: f.transactionCount,
+        totalAmount: f.totalAmount,
+        schemaValid: f.schemaValidation?.valid !== false,
+      })),
+      totalTransactions: totalTxns,
+      totalAmount: totalAmt,
+      allSchemaValid: allValid,
+    });
+  };
 
   return (
     <div className="min-h-screen flex flex-col bg-background">
@@ -75,16 +120,16 @@ export default function Home() {
       <main className="flex-1 relative">
         <div className="container py-8">
           <div className="flex gap-8 max-w-4xl mx-auto">
-            {/* Left sidebar — Step indicator */}
+            {/* Left sidebar — Step indicator + info cards + history */}
             <aside className="hidden md:block w-52 shrink-0">
-              <div className="sticky top-24">
+              <div className="sticky top-24 space-y-3">
                 <StepIndicator
                   currentStep={state.step}
                   onStepClick={goToStep}
                 />
 
                 {/* Privacy note */}
-                <div className="mt-8 p-4 bg-muted/40 rounded-lg border border-border/50">
+                <div className="p-4 bg-muted/40 rounded-lg border border-border/50">
                   <div className="flex items-center gap-2 mb-2">
                     <Lock className="w-3.5 h-3.5 text-primary" />
                     <span className="text-[11px] font-semibold text-foreground uppercase tracking-wider">
@@ -97,7 +142,7 @@ export default function Home() {
                 </div>
 
                 {/* Supported formats */}
-                <div className="mt-3 p-4 bg-muted/40 rounded-lg border border-border/50">
+                <div className="p-4 bg-muted/40 rounded-lg border border-border/50">
                   <span className="text-[11px] font-semibold text-foreground uppercase tracking-wider">
                     Supported Formats
                   </span>
@@ -116,6 +161,13 @@ export default function Home() {
                     </div>
                   </div>
                 </div>
+
+                {/* History panel */}
+                <HistoryPanel
+                  entries={entries}
+                  onRemove={removeEntry}
+                  onClear={clearHistory}
+                />
               </div>
             </aside>
 
@@ -183,12 +235,22 @@ export default function Home() {
                 <ResultsStep
                   generatedFiles={state.generatedFiles}
                   onReset={reset}
+                  onRecordHistory={recordHistory}
                 />
               )}
             </div>
           </div>
         </div>
       </main>
+
+      {/* Mobile history (shown below main content on small screens) */}
+      <div className="md:hidden px-4 pb-4">
+        <HistoryPanel
+          entries={entries}
+          onRemove={removeEntry}
+          onClear={clearHistory}
+        />
+      </div>
 
       {/* Footer */}
       <footer className="border-t border-border py-4 mt-auto">

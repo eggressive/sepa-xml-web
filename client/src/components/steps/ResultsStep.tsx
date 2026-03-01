@@ -2,7 +2,7 @@
  * Design: Swiss Banking — Precision Minimalism
  * Results step: shows generated files with XSD schema validation, XML preview, and download.
  */
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import type { GeneratedFile } from "@/lib/sepa/models";
 import {
@@ -31,12 +31,22 @@ import { toast } from "sonner";
 interface ResultsStepProps {
   generatedFiles: GeneratedFile[];
   onReset: () => void;
+  onRecordHistory?: () => void;
 }
 
-export function ResultsStep({ generatedFiles, onReset }: ResultsStepProps) {
+export function ResultsStep({ generatedFiles, onReset, onRecordHistory }: ResultsStepProps) {
   const [expandedIndex, setExpandedIndex] = useState<number | null>(null);
   const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
   const [validationExpanded, setValidationExpanded] = useState<number | null>(null);
+  const historyRecorded = useRef(false);
+
+  // Record history once when the results step is first shown
+  useEffect(() => {
+    if (!historyRecorded.current && generatedFiles.length > 0 && onRecordHistory) {
+      onRecordHistory();
+      historyRecorded.current = true;
+    }
+  }, [generatedFiles, onRecordHistory]);
 
   const handleDownloadSingle = (file: GeneratedFile) => {
     const blob = new Blob([file.xmlContent], { type: "application/xml;charset=utf-8" });
