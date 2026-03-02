@@ -121,6 +121,18 @@ pnpm build
 
 The production build is output to `dist/`.
 
+### Offline Portable Build
+
+To create a self-contained single HTML file that works without a server or internet connection:
+
+```bash
+node build-offline.mjs
+```
+
+This produces `dist/sepa-xml-generator.html` (~1.8 MB) which bundles all JavaScript, CSS, fonts (DM Sans, JetBrains Mono — latin subset), and images into a single file. Users can save it to their desktop and open it directly in Chrome, Edge, or Firefox.
+
+This is particularly useful when the hosted version is blocked by corporate firewalls.
+
 ---
 
 ## Usage
