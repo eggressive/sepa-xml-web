@@ -6,14 +6,15 @@
  * 
  * This script:
  * 1. Runs the Vite build with vite-plugin-singlefile to inline JS/CSS
- * 2. Inlines the Google Fonts (latin subset) as base64
- * 3. Inlines the hero pattern image as base64 data URI
- * 4. Removes analytics/tracking scripts
- * 5. Produces a single portable HTML file
+ * 2. Converts <script type="module"> to classic <script> (IIFE) for file:// compatibility
+ * 3. Inlines the Google Fonts (latin subset) as base64
+ * 4. Inlines the hero pattern image as base64 data URI
+ * 5. Removes analytics/tracking scripts
+ * 6. Produces a single portable HTML file that works from file:// protocol
  */
 
 import { execSync } from "child_process";
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from "fs";
+import { readFileSync, writeFileSync, mkdirSync, existsSync, unlinkSync } from "fs";
 import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
 
@@ -22,8 +23,9 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 console.log("=== SEPA XML Generator — Offline Build ===\n");
 
 // Step 1: Create a temporary vite config for the offline build
-console.log("[1/5] Creating offline Vite config...");
+console.log("[1/6] Creating offline Vite config...");
 
+// Use IIFE format to avoid ES module issues with file:// protocol
 const offlineViteConfig = `
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
@@ -46,7 +48,14 @@ export default defineConfig({
     outDir: path.resolve(import.meta.dirname, "dist/offline"),
     emptyOutDir: true,
     cssCodeSplit: false,
-    assetsInlineLimit: 100000000, // Inline everything
+    assetsInlineLimit: 100000000,
+    rollupOptions: {
+      output: {
+        // Use IIFE format instead of ES modules for file:// compatibility
+        format: "iife",
+        inlineDynamicImports: true,
+      },
+    },
   },
 });
 `;
@@ -54,7 +63,7 @@ export default defineConfig({
 writeFileSync(resolve(__dirname, "vite.offline.config.ts"), offlineViteConfig);
 
 // Step 2: Build with the offline config
-console.log("[2/5] Running Vite build with singlefile plugin...");
+console.log("[2/6] Running Vite build with IIFE format...");
 try {
   execSync("npx vite build --config vite.offline.config.ts", {
     cwd: __dirname,
@@ -67,12 +76,45 @@ try {
 }
 
 // Step 3: Read the built HTML
-console.log("[3/5] Post-processing HTML...");
+console.log("[3/6] Post-processing HTML...");
 const htmlPath = resolve(__dirname, "dist/offline/index.html");
 let html = readFileSync(htmlPath, "utf-8");
 
-// Step 4: Inline fonts
-console.log("[4/5] Inlining fonts...");
+// Step 4: Convert <script type="module"> to classic <script> and move to end of body
+// ES modules are deferred by default, but classic scripts execute immediately.
+// When placed in <head>, the script runs before <div id="root"> exists, so React
+// can't mount. Fix: extract the script from <head>, convert to classic, and place
+// it at the end of <body> after the root div.
+console.log("[4/6] Converting module scripts and moving to end of body...");
+
+// Extract all inline script content from module scripts
+const scriptContents = [];
+html = html.replace(/<script\s+type="module"[^>]*>(.*?)<\/script>/gs, (match, content) => {
+  if (content.trim()) {
+    scriptContents.push(content);
+  }
+  return ''; // Remove from original position
+});
+
+// Also handle any already-converted classic scripts with content in head
+html = html.replace(/<script\s+crossorigin>(.*?)<\/script>/gs, (match, content) => {
+  if (content.trim()) {
+    scriptContents.push(content);
+  }
+  return '';
+});
+
+// Place all scripts at the end of body, after the root div
+if (scriptContents.length > 0) {
+  const allScripts = scriptContents.map(s => `<script>${s}</script>`).join('\n');
+  html = html.replace('</body>', `${allScripts}\n</body>`);
+  console.log(`  Moved ${scriptContents.length} script(s) to end of body.`);
+} else {
+  console.log("  Warning: No inline scripts found to move.");
+}
+
+// Step 5: Inline fonts
+console.log("[5/6] Inlining fonts...");
 const fontsPath = resolve(__dirname, "client/src/assets/fonts/fonts-inline.css");
 if (existsSync(fontsPath)) {
   const fontsCss = readFileSync(fontsPath, "utf-8");
@@ -92,13 +134,12 @@ if (existsSync(fontsPath)) {
   console.log("  Warning: fonts-inline.css not found, fonts will require internet.");
 }
 
-// Step 5: Inline hero image
-console.log("[5/5] Inlining hero image...");
+// Step 6: Inline hero image
+console.log("[6/6] Inlining hero image...");
 const heroImagePath = "/tmp/hero-pattern.webp";
 if (existsSync(heroImagePath)) {
   const heroB64 = readFileSync(heroImagePath).toString("base64");
   const heroDataUri = `data:image/webp;base64,${heroB64}`;
-  // Replace the CDN URL with the data URI
   html = html.replace(
     /https:\/\/d2xsxph8kpxj0f\.cloudfront\.net\/[^"')]+hero-pattern[^"')]+/g,
     heroDataUri
@@ -119,10 +160,13 @@ html = html.replace(
 // Remove any remaining preconnect hints to external domains
 html = html.replace(/<link[^>]*preconnect[^>]*>/g, "");
 
-// Add offline indicator comment
+// Add offline indicator and meta tag for file:// compatibility
 html = html.replace(
   "<head>",
-  `<head>\n<!-- SEPA XML Generator — Offline Portable Version -->\n<!-- Generated: ${new Date().toISOString()} -->`
+  `<head>
+<!-- SEPA XML Generator — Offline Portable Version -->
+<!-- Generated: ${new Date().toISOString()} -->
+<!-- This file works when opened directly from the filesystem (file:// protocol) -->`
 );
 
 // Write final output
@@ -137,11 +181,10 @@ const sizeMB = (Buffer.byteLength(html) / 1024 / 1024).toFixed(2);
 console.log(`\n✓ Offline build complete!`);
 console.log(`  Output: dist/sepa-xml-generator.html`);
 console.log(`  Size:   ${sizeKB}KB (${sizeMB}MB)`);
-console.log(`\nTo use: Open sepa-xml-generator.html in any modern browser.`);
+console.log(`\nTo use: Open sepa-xml-generator.html directly in Chrome, Edge, or Firefox.`);
+console.log(`Works from file:// protocol — no server needed.`);
 
 // Cleanup temp config
-import("fs").then((fs) => {
-  try {
-    fs.unlinkSync(resolve(__dirname, "vite.offline.config.ts"));
-  } catch {}
-});
+try {
+  unlinkSync(resolve(__dirname, "vite.offline.config.ts"));
+} catch {}

@@ -1,11 +1,28 @@
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { Route, Switch } from "wouter";
+import { Route, Switch, Router as WouterRouter } from "wouter";
+import { useMemo } from "react";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { ThemeProvider } from "./contexts/ThemeContext";
 import Home from "./pages/Home";
 
-function Router() {
+/**
+ * Detect if running from file:// protocol (offline portable version).
+ * When opened from file://, wouter sees the full filesystem path as the URL,
+ * which doesn't match "/". We use wouter's base prop to handle this.
+ */
+function useBasePath() {
+  return useMemo(() => {
+    if (typeof window !== "undefined" && window.location.protocol === "file:") {
+      // For file:// URLs, the pathname is the full path to the HTML file.
+      // We set the base to the full pathname so that "/" route matches.
+      return window.location.pathname;
+    }
+    return "";
+  }, []);
+}
+
+function AppRouter() {
   return (
     <Switch>
       <Route path={"/"} component={Home} />
@@ -19,12 +36,20 @@ function Router() {
 }
 
 function App() {
+  const basePath = useBasePath();
+
   return (
     <ErrorBoundary>
       <ThemeProvider defaultTheme="light">
         <TooltipProvider>
           <Toaster />
-          <Router />
+          {basePath ? (
+            <WouterRouter base={basePath}>
+              <AppRouter />
+            </WouterRouter>
+          ) : (
+            <AppRouter />
+          )}
         </TooltipProvider>
       </ThemeProvider>
     </ErrorBoundary>
