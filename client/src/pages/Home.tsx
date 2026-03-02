@@ -239,6 +239,7 @@ export default function Home() {
                   file={state.file}
                   onFileSelect={setFile}
                   error={state.error}
+                  isProcessing={state.isProcessing}
                 />
               )}
 

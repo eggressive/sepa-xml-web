@@ -3,24 +3,60 @@ import type { BankProfile, PaymentTransaction } from "./models";
 import { ValidationResult, columnLetterToIndex } from "./models";
 import { getDefault } from "./profiles";
 import { cleanAccountNumber, cleanBic, cleanIban, cleanText } from "./sanitizer";
+import { cleanExcelFile } from "./excelCleaner";
 
 /**
  * Get available sheet names from an Excel file buffer.
+ * Uses a two-pass strategy: tries normal parsing first, then falls back
+ * to cleaning the file if Microsoft 365 namespaces cause errors.
  */
-export function getSheetNames(data: ArrayBuffer): string[] {
-  const workbook = XLSX.read(data, { type: "array", cellDates: true });
-  return workbook.SheetNames;
+export async function getSheetNames(data: ArrayBuffer): Promise<string[]> {
+  try {
+    const workbook = XLSX.read(data, { type: "array", cellDates: true });
+    return workbook.SheetNames;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (isNamespaceError(msg)) {
+      console.warn(
+        "[SEPA] Browser xlsx parser hit namespace error, cleaning file and retrying...",
+        msg
+      );
+      const cleaned = await cleanExcelFile(data);
+      const workbook = XLSX.read(cleaned, { type: "array", cellDates: true });
+      return workbook.SheetNames;
+    }
+    throw err;
+  }
 }
 
 /**
  * Read transactions from the specified sheets of an Excel file.
+ * Uses a two-pass strategy: tries normal parsing first, then falls back
+ * to cleaning the file if Microsoft 365 namespaces cause errors.
  */
-export function readTransactions(
+export async function readTransactions(
   data: ArrayBuffer,
   profile: BankProfile,
   sheetNames: string[]
-): { transactions: PaymentTransaction[]; validation: ValidationResult } {
-  const workbook = XLSX.read(data, { type: "array", cellDates: true, cellText: true });
+): Promise<{ transactions: PaymentTransaction[]; validation: ValidationResult }> {
+  let workbook: XLSX.WorkBook;
+
+  try {
+    workbook = XLSX.read(data, { type: "array", cellDates: true, cellText: true });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (isNamespaceError(msg)) {
+      console.warn(
+        "[SEPA] Browser xlsx parser hit namespace error during readTransactions, cleaning file and retrying...",
+        msg
+      );
+      const cleaned = await cleanExcelFile(data);
+      workbook = XLSX.read(cleaned, { type: "array", cellDates: true, cellText: true });
+    } else {
+      throw err;
+    }
+  }
+
   const transactions: PaymentTransaction[] = [];
   const validation = new ValidationResult();
 
@@ -36,6 +72,23 @@ export function readTransactions(
   }
 
   return { transactions, validation };
+}
+
+/**
+ * Check if an error message indicates a namespace-related parsing failure.
+ * These occur when the browser's DOMParser encounters Microsoft 365
+ * custom XML namespaces that the xlsx library doesn't recognize.
+ */
+function isNamespaceError(message: string): boolean {
+  const lower = message.toLowerCase();
+  return (
+    lower.includes("namespace") ||
+    lower.includes("unknown xml") ||
+    lower.includes("unrecognized") ||
+    lower.includes("unexpected xml") ||
+    lower.includes("xml parse") ||
+    lower.includes("invalid xml")
+  );
 }
 
 function readSheet(

@@ -46,9 +46,10 @@ export function useSepaProcessor() {
   }, []);
 
   const setFile = useCallback(async (file: File) => {
+    setState((prev) => ({ ...prev, isProcessing: true, error: null }));
     try {
       const data = await file.arrayBuffer();
-      const sheets = getSheetNames(data);
+      const sheets = await getSheetNames(data);
 
       setState((prev) => ({
         ...prev,
@@ -57,11 +58,13 @@ export function useSepaProcessor() {
         availableSheets: sheets,
         selectedSheets: [],
         step: "configure",
+        isProcessing: false,
         error: null,
       }));
     } catch (err) {
       setState((prev) => ({
         ...prev,
+        isProcessing: false,
         error: `Failed to read file: ${err instanceof Error ? err.message : String(err)}`,
       }));
     }
@@ -95,54 +98,74 @@ export function useSepaProcessor() {
     setState((prev) => ({ ...prev, selectedSheets: sheets }));
   }, []);
 
-  const processFile = useCallback(() => {
+  const processFile = useCallback(async () => {
+    // Capture current state
+    let currentState: ProcessingState | null = null;
     setState((prev) => {
-      if (!prev.fileData || !prev.selectedProfile || prev.selectedSheets.length === 0) {
-        return { ...prev, error: "Please select a profile and at least one sheet." };
-      }
-
-      try {
-        // Step 1: Read transactions
-        const { transactions, validation: readValidation } = readTransactions(
-          prev.fileData,
-          prev.selectedProfile,
-          prev.selectedSheets
-        );
-
-        if (transactions.length === 0) {
-          readValidation.addError("", 0, "File", "No valid transactions found in the selected sheets.");
-          return {
-            ...prev,
-            validation: readValidation,
-            step: "preview",
-            routedPayments: [],
-          };
-        }
-
-        // Step 2: Validate transactions
-        const { valid, validation } = validateTransactions(
-          transactions,
-          prev.selectedProfile,
-          readValidation
-        );
-
-        // Step 3: Route payments
-        const routed = routePayments(valid, prev.selectedProfile);
-
-        return {
-          ...prev,
-          routedPayments: routed,
-          validation,
-          step: "preview",
-          error: null,
-        };
-      } catch (err) {
-        return {
-          ...prev,
-          error: `Processing failed: ${err instanceof Error ? err.message : String(err)}`,
-        };
-      }
+      currentState = prev;
+      return { ...prev, isProcessing: true, error: null };
     });
+
+    // Wait a tick for state to settle
+    await new Promise((r) => setTimeout(r, 0));
+
+    if (!currentState) return;
+    const cs = currentState as ProcessingState;
+
+    if (!cs.fileData || !cs.selectedProfile || cs.selectedSheets.length === 0) {
+      setState((prev) => ({
+        ...prev,
+        isProcessing: false,
+        error: "Please select a profile and at least one sheet.",
+      }));
+      return;
+    }
+
+    try {
+      // Step 1: Read transactions (async - may need to clean file)
+      const { transactions, validation: readValidation } = await readTransactions(
+        cs.fileData,
+        cs.selectedProfile,
+        cs.selectedSheets
+      );
+
+      if (transactions.length === 0) {
+        readValidation.addError("", 0, "File", "No valid transactions found in the selected sheets.");
+        setState((prev) => ({
+          ...prev,
+          validation: readValidation,
+          step: "preview",
+          routedPayments: [],
+          isProcessing: false,
+        }));
+        return;
+      }
+
+      // Step 2: Validate transactions
+      const { valid, validation } = validateTransactions(
+        transactions,
+        cs.selectedProfile,
+        readValidation
+      );
+
+      // Step 3: Route payments
+      const routed = routePayments(valid, cs.selectedProfile);
+
+      setState((prev) => ({
+        ...prev,
+        routedPayments: routed,
+        validation,
+        step: "preview",
+        isProcessing: false,
+        error: null,
+      }));
+    } catch (err) {
+      setState((prev) => ({
+        ...prev,
+        isProcessing: false,
+        error: `Processing failed: ${err instanceof Error ? err.message : String(err)}`,
+      }));
+    }
   }, []);
 
   const generateFiles = useCallback(() => {

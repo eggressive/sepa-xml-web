@@ -6,9 +6,10 @@ interface UploadStepProps {
   file: File | null;
   onFileSelect: (file: File) => void;
   error: string | null;
+  isProcessing?: boolean;
 }
 
-export function UploadStep({ file, onFileSelect, error }: UploadStepProps) {
+export function UploadStep({ file, onFileSelect, error, isProcessing }: UploadStepProps) {
   const [isDragging, setIsDragging] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -57,12 +58,20 @@ export function UploadStep({ file, onFileSelect, error }: UploadStepProps) {
         </p>
       </div>
 
+      {/* Loading indicator */}
+      {isProcessing && (
+        <div className="flex items-center gap-3 p-4 bg-primary/5 border border-primary/20 rounded-lg">
+          <div className="w-5 h-5 border-2 border-primary/30 border-t-primary rounded-full animate-spin" />
+          <p className="text-sm text-primary">Reading Excel file... This may take a moment for large files.</p>
+        </div>
+      )}
+
       {/* Drop zone */}
       <div
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
-        onClick={() => inputRef.current?.click()}
+        onClick={() => !isProcessing && inputRef.current?.click()}
         className={`
           relative border-2 border-dashed rounded-xl p-12 text-center cursor-pointer
           transition-all duration-200
