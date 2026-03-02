@@ -6,56 +6,59 @@ import { cleanAccountNumber, cleanBic, cleanIban, cleanText } from "./sanitizer"
 import { cleanExcelFile } from "./excelCleaner";
 
 /**
+ * Prepare an Excel file buffer for parsing.
+ * Always cleans .xlsx files through JSZip to remove Microsoft 365
+ * custom XML parts that cause browser DOMParser errors.
+ *
+ * This "always-clean" strategy is more reliable than try-catch fallback
+ * because the xlsx library can throw various error types (TypeError,
+ * Error, etc.) depending on which namespace triggers the failure,
+ * and some errors crash React before they can be caught.
+ */
+async function prepareExcelData(data: ArrayBuffer): Promise<ArrayBuffer> {
+  // Check if this is a ZIP-based format (.xlsx, .xlsm) by looking at the magic bytes
+  const header = new Uint8Array(data, 0, 4);
+  const isZip =
+    header[0] === 0x50 &&
+    header[1] === 0x4b &&
+    header[2] === 0x03 &&
+    header[3] === 0x04;
+
+  if (isZip) {
+    console.log("[SEPA] Cleaning Excel file to remove Microsoft 365 custom XML parts...");
+    try {
+      return await cleanExcelFile(data);
+    } catch (cleanErr) {
+      console.warn("[SEPA] File cleaning failed, proceeding with original:", cleanErr);
+      return data;
+    }
+  }
+
+  // Non-ZIP formats (.xls binary) don't have the namespace issue
+  return data;
+}
+
+/**
  * Get available sheet names from an Excel file buffer.
- * Uses a two-pass strategy: tries normal parsing first, then falls back
- * to cleaning the file if Microsoft 365 namespaces cause errors.
+ * Always pre-cleans .xlsx files to avoid namespace errors.
  */
 export async function getSheetNames(data: ArrayBuffer): Promise<string[]> {
-  try {
-    const workbook = XLSX.read(data, { type: "array", cellDates: true });
-    return workbook.SheetNames;
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    if (isNamespaceError(msg)) {
-      console.warn(
-        "[SEPA] Browser xlsx parser hit namespace error, cleaning file and retrying...",
-        msg
-      );
-      const cleaned = await cleanExcelFile(data);
-      const workbook = XLSX.read(cleaned, { type: "array", cellDates: true });
-      return workbook.SheetNames;
-    }
-    throw err;
-  }
+  const cleaned = await prepareExcelData(data);
+  const workbook = XLSX.read(cleaned, { type: "array", cellDates: true });
+  return workbook.SheetNames;
 }
 
 /**
  * Read transactions from the specified sheets of an Excel file.
- * Uses a two-pass strategy: tries normal parsing first, then falls back
- * to cleaning the file if Microsoft 365 namespaces cause errors.
+ * Always pre-cleans .xlsx files to avoid namespace errors.
  */
 export async function readTransactions(
   data: ArrayBuffer,
   profile: BankProfile,
   sheetNames: string[]
 ): Promise<{ transactions: PaymentTransaction[]; validation: ValidationResult }> {
-  let workbook: XLSX.WorkBook;
-
-  try {
-    workbook = XLSX.read(data, { type: "array", cellDates: true, cellText: true });
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    if (isNamespaceError(msg)) {
-      console.warn(
-        "[SEPA] Browser xlsx parser hit namespace error during readTransactions, cleaning file and retrying...",
-        msg
-      );
-      const cleaned = await cleanExcelFile(data);
-      workbook = XLSX.read(cleaned, { type: "array", cellDates: true, cellText: true });
-    } else {
-      throw err;
-    }
-  }
+  const cleaned = await prepareExcelData(data);
+  const workbook = XLSX.read(cleaned, { type: "array", cellDates: true, cellText: true });
 
   const transactions: PaymentTransaction[] = [];
   const validation = new ValidationResult();
@@ -72,23 +75,6 @@ export async function readTransactions(
   }
 
   return { transactions, validation };
-}
-
-/**
- * Check if an error message indicates a namespace-related parsing failure.
- * These occur when the browser's DOMParser encounters Microsoft 365
- * custom XML namespaces that the xlsx library doesn't recognize.
- */
-function isNamespaceError(message: string): boolean {
-  const lower = message.toLowerCase();
-  return (
-    lower.includes("namespace") ||
-    lower.includes("unknown xml") ||
-    lower.includes("unrecognized") ||
-    lower.includes("unexpected xml") ||
-    lower.includes("xml parse") ||
-    lower.includes("invalid xml")
-  );
 }
 
 function readSheet(
