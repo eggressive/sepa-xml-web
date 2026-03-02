@@ -7,6 +7,9 @@ dist/
 build/
 *.dist
 
+# Keep release/ folder (offline builds for distribution)
+!release/
+
 # Environment variables
 .env
 .env.local
